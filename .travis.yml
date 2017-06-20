@@ -33,7 +33,7 @@ before_install:
 - gem install json
 - gem install activesupport
 - gem install net
-- gem install pry
+#- gem install pry
 #- ruby ./travis.rb
 
 
