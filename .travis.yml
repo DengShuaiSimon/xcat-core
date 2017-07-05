@@ -74,7 +74,8 @@ script:
 
 #- ruby ./travis.rb
 #- perl travis.pl
-- perl travis_new.pl
+- if [ $TRAVIS_EVENT_TYPE == "pull_request" ]; then perl ./travis.pl;   fi 
+#- perl travis_new.pl
 
 
 #- mkdir -p ./check-perl-lib/haha
