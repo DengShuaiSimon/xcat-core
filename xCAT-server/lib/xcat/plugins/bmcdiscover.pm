@@ -46,6 +46,7 @@ my $bmc_user;
 my $bmc_pass;
 my $openbmc_user;
 my $openbmc_pass;
+my $openbmc_port = 2200;
 
 #-------------------------------------------------------
 
@@ -82,6 +83,13 @@ sub process_request
     $::CALLBACK = $callback;
 
     #$::args     = $request->{arg};
+    if (ref($request->{environment}) eq 'ARRAY' and ref($request->{environment}->[0]->{XCAT_DEV_WITHERSPOON}) eq 'ARRAY') {
+        $::XCAT_DEV_WITHERSPOON = $request->{environment}->[0]->{XCAT_DEV_WITHERSPOON}->[0];
+    } elsif (ref($request->{environment}) eq 'ARRAY') {
+        $::XCAT_DEV_WITHERSPOON = $request->{environment}->[0]->{XCAT_DEV_WITHERSPOON};
+    } else {
+        $::XCAT_DEV_WITHERSPOON = $request->{environment}->{XCAT_DEV_WITHERSPOON};
+    }
 
     unless (defined($request->{arg})) {
         bmcdiscovery_usage();
@@ -584,20 +592,12 @@ sub scan_process {
                 # Set child process default, if not the function runcmd may return error
                 $SIG{CHLD} = 'DEFAULT';
 
-                my $nmap_cmd = "nmap ${$live_ip}[$i] -p 2200 -Pn";
+                my $nmap_cmd = "nmap ${$live_ip}[$i] -p $openbmc_port -Pn";
                 my $nmap_output = xCAT::Utils->runcmd($nmap_cmd, -1);
-                if ($nmap_output =~ /2200\/tcp (\w+)/) {
-                    my $port_stat = $1;
-                    if ($port_stat eq "open") {
-                        bmcdiscovery_openbmc(${$live_ip}[$i], $opz, $opw, $request_command);
-                    } else {
-                        bmcdiscovery_ipmi(${$live_ip}[$i], $opz, $opw, $request_command);
-                    }
+                if ($nmap_output =~ /$openbmc_port(.+)open/) {
+                    bmcdiscovery_openbmc(${$live_ip}[$i], $opz, $opw, $request_command);
                 } else {
-                    my $rsp = {};
-                    push @{ $rsp->{data} }, "Can not get status of 2200 port for ip ${$live_ip}[$i].\n";
-                    xCAT::MsgUtils->message("E", $rsp, $::CALLBACK);
-                    exit 1;
+                    bmcdiscovery_ipmi(${$live_ip}[$i], $opz, $opw, $request_command);
                 }
 
                 exit 0;
@@ -1048,10 +1048,12 @@ sub bmcdiscovery_openbmc{
     my $request_command = shift;
     my $node            = sprintf("node-%08x", unpack("N*", inet_aton($ip)));
 
+    print "$ip: Detected openbmc, attempting to obtain system information...\n";
     my $http_protocol="https";
     my $openbmc_project_url = "xyz/openbmc_project";
     my $login_endpoint = "login";
     my $system_endpoint = "inventory/system";
+    my $motherboard_boxelder_endpoint = "$system_endpoint/chassis/motherboard/boxelder/bmc";
 
     my $node_data = $ip;
     my $brower = LWP::UserAgent->new( ssl_opts => { SSL_verify_mode => 0x00, verify_hostname => 0  }, );
@@ -1065,17 +1067,31 @@ sub bmcdiscovery_openbmc{
     my $login_response = $brower->request($login_request);
     
     if ($login_response->is_success) {
+        # attempt to find the system serial/model
         $url = "$http_protocol://$ip/$openbmc_project_url/$system_endpoint";
         my $req = HTTP::Request->new('GET', $url, $header);
         my $req_output = $brower->request($req);
-        return if ($req_output->is_error); 
+        if ($req_output->is_error) {
+            # If the host system has not yet been powered on, check the boxelder bmc info for model/serial
+            $url = "$http_protocol://$ip/$openbmc_project_url/$motherboard_boxelder_endpoint";
+            $req = HTTP::Request->new('GET', $url, $header);
+            $req_output = $brower->request($req);
+            if ($req_output->is_error) {
+                xCAT::MsgUtils->message("W", { data => ["$ip: Could not obtain system information from BMC."] }, $::CALLBACK);
+                return;
+            }
+        }
         my $response = decode_json $req_output->content;
         my $mtm;
         my $serial;
 
         if (defined($response->{data})) {
-            if (defined($response->{data}->{PartNumber}) and defined($response->{data}->{SerialNumber})) {
-                $mtm = $response->{data}->{PartNumber};
+            if (defined($response->{data}->{Model}) and defined($response->{data}->{SerialNumber})) {
+                $mtm = $response->{data}->{Model};
+                if (defined($::XCAT_DEV_WITHERSPOON) && ($::XCAT_DEV_WITHERSPOON eq "TRUE")) {
+                    xCAT::MsgUtils->message("I", { data => ["XCAT_DEV_WITHERSPOON=TRUE, forcing MTM to empty string for $ip (Original MTM=$mtm)"] }, $::CALLBACK);
+                    $mtm = "";
+                }
                 $serial = $response->{data}->{SerialNumber}; 
             } else {
                 xCAT::MsgUtils->message("W", { data => ["Could not obtain Model Type and/or Serial Number for BMC at $ip"] }, $::CALLBACK);

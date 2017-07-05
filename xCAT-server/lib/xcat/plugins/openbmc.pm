@@ -29,6 +29,7 @@ use xCAT::SvrUtils;
 use xCAT::GlobalDef;
 use xCAT_monitoring::monitorctrl;
 
+$::VERBOSE = 0;
 # String constants for rpower states
 $::POWER_STATE_OFF="off";
 $::POWER_STATE_ON="on";
@@ -36,6 +37,7 @@ $::POWER_STATE_POWERING_OFF="powering-off";
 $::POWER_STATE_POWERING_ON="powering-on";
 $::POWER_STATE_QUIESCED="quiesced";
 $::POWER_STATE_RESET="reset";
+$::UPLOAD_FILE="";
 
 $::NO_ATTRIBUTES_RETURNED="No attributes returned from the BMC.";
 
@@ -126,6 +128,13 @@ my %status_info = (
     RFLASH_LIST_RESPONSE => {
         process        => \&rflash_response,
     },
+    RFLASH_FILE_UPLOAD_REQUEST  => {
+        method         => "PUT",
+        init_url       => "$openbmc_project_url/upload/image/",
+    },
+    RFLASH_FILE_UPLOAD_RESPONSE => {
+        process        => \&rflash_response,
+    },
 
     RINV_REQUEST => {
         method         => "GET",
@@ -205,6 +214,13 @@ my %status_info = (
     RSPCONFIG_SET_RESPONSE => {
         process        => \&rspconfig_response,
     },
+    RSPCONFIG_SSHCFG_REQUEST => {
+        method         => "GET",
+        init_url       => "",
+    },
+    RSPCONFIG_SSHCFG_RESPONSE => {
+        process        => \&rspconfig_sshcfg_response,
+    },
     RVITALS_REQUEST => {
         method         => "GET",
         init_url       => "$openbmc_project_url/sensors/enumerate",
@@ -217,6 +233,7 @@ my %status_info = (
 $::RESPONSE_OK                  = "200 OK";
 $::RESPONSE_SERVER_ERROR        = "500 Internal Server Error";
 $::RESPONSE_SERVICE_UNAVAILABLE = "503 Service Unavailable";
+$::RESPONSE_METHOD_NOT_ALLOWED  = "405 Method Not Allowed";
 
 #-----------------------------
 
@@ -273,6 +290,8 @@ sub preprocess_request {
 
     if (ref($request->{environment}) eq 'ARRAY' and ref($request->{environment}->[0]->{XCAT_OPENBMC_DEVEL}) eq 'ARRAY') {
         $::OPENBMC_DEVEL = $request->{environment}->[0]->{XCAT_OPENBMC_DEVEL}->[0];
+    } elsif (ref($request->{environment}) eq 'ARRAY') {
+        $::OPENBMC_DEVEL = $request->{environment}->[0]->{XCAT_OPENBMC_DEVEL};
     } else {
         $::OPENBMC_DEVEL = $request->{environment}->{XCAT_OPENBMC_DEVEL};
     }
@@ -400,23 +419,34 @@ sub parse_args {
     my $extrargs = shift;
     my $noderange = shift;
     my $check = undef;
- 
+
     if (!defined($extrargs) and $command =~ /rpower|rsetboot|rspconfig|rflash/) {
         return ([ 1, "No option specified for $command" ]);
     }
 
-    if (scalar(@ARGV) > 1 and ($command =~ /rpower|rinv|rsetboot|rvitals/)) {
+    my $subcommand = undef;
+    if (scalar(@ARGV) > 2 and ($command =~ /rpower|rinv|rsetboot|rvitals/)) {
         return ([ 1, "Only one option is supported at the same time" ]);
+    } elsif (scalar(@ARGV) == 2) {
+        # Check if one is calling for Verbose output
+        foreach (@ARGV) {
+           if ($_ =~ /V|verbose/) {
+              $::VERBOSE=1;
+           } else {
+               $subcommand = $_
+           }
+        }
+    } else { 
+         $subcommand = $ARGV[0]
     }
 
-    my $subcommand = $ARGV[0];
     if ($command eq "rpower") {
         unless ($subcommand =~ /^on$|^off$|^reset$|^boot$|^status$|^stat$|^state$/) {
             return ([ 1, "Unsupported command: $command $subcommand" ]);
         }
     } elsif ($command eq "rinv") {
         $subcommand = "all" if (!defined($ARGV[0]));
-        unless ($subcommand =~ /^cpu$|^dimm$|^model$|^serial$|^firm$|^mac$|^vpd$|^mprom$|^deviceid$|^guid$|^uuid$|^all$/) {
+        unless ($subcommand =~ /^model$|^serial$|^firm$|^cpu$|^dimm$|^all$/) {
             return ([ 1, "Unsupported command: $command $subcommand" ]);
         }
     } elsif ($command eq "getopenbmccons") {
@@ -461,6 +491,8 @@ sub parse_args {
             } elsif ($subcommand =~ /^ip$|^netmask$|^gateway$|^vlan$/) {
                 return ([ 1, "Can not configure and display nodes' value at the same time" ]) if ($setorget and $setorget eq "set");
                 $setorget = "get";
+            } elsif ($subcommand =~ /^sshcfg$/) {
+                $setorget = ""; # SSH Keys are copied using a RShellAPI, not REST API
             } else {
                 return ([ 1, "Unsupported command: $command $subcommand" ]);
             }
@@ -516,6 +548,14 @@ sub parse_command_status {
     my $subcommand;
 
     $next_status{LOGIN_REQUEST} = "LOGIN_RESPONSE";
+
+    my $verbose = undef;
+    unless (GetOptions(
+        'V|verbose'  => \$verbose,
+    )) {
+        xCAT::SvrUtils::sendmsg("Error parsing arguments.", $callback);
+        return 1;
+    }
 
     if ($command eq "rpower") {
         $subcommand = $ARGV[0];
@@ -620,6 +660,13 @@ sub parse_command_status {
                 $next_status{LOGIN_RESPONSE} = "RSPCONFIG_GET_REQUEST";
                 $next_status{RSPCONFIG_GET_REQUEST} = "RSPCONFIG_GET_RESPONSE";
                 push @options, $subcommand;
+            } elsif ($subcommand =~ /^sshcfg$/) {
+                # Special processing to copy ssh keys, currently there is no REST API to do this.
+                # Instead, copy ssh key file to the BMC in function specified by RSPCONFIG_SSHCFG_RESPONSE
+                $next_status{LOGIN_RESPONSE} = "RSPCONFIG_SSHCFG_REQUEST";
+                $next_status{RSPCONFIG_SSHCFG_REQUEST} = "RSPCONFIG_SSHCFG_RESPONSE";
+                push @options, $subcommand;
+                return 0;
             } elsif ($subcommand =~ /^(\w+)=(.+)/) {
                 my $key   = $1;
                 my $value = $2;
@@ -677,6 +724,12 @@ sub parse_command_status {
             if ($update_file =~ /.*\.tar$/) {
                 # Filename ending on .tar was specified
                 $filename = $update_file;
+                $::UPLOAD_FILE = $update_file; # Save filename to upload
+                # Verify file exists and is readable
+                unless (-r $filename) {
+                    xCAT::SvrUtils::sendmsg([1,"Cannot access $filename"], $callback);
+                    return 1;
+                }
                 if ($check_version) {
                     # Display firmware version of the specified .tar file
                     my $firmware_version_in_file = `$grep_cmd $version_tag $filename`;
@@ -710,8 +763,9 @@ sub parse_command_status {
             return 1;
         }
         if ($upload) {
-            xCAT::SvrUtils::sendmsg("Upload option is not yet supported.", $callback);
-            return 1;
+            # Upload specified update file to  BMC
+            $next_status{LOGIN_RESPONSE} = "RFLASH_FILE_UPLOAD_REQUEST";
+            $next_status{"RFLASH_FILE_UPLOAD_REQUEST"} = "RFLASH_FILE_UPLOAD_RESPONSE";
         }
     }
 
@@ -832,7 +886,13 @@ sub gen_send_request {
     if ($method eq "GET") {
         $debug_info = "$node: DEBUG $method $request_url";
     } else {
-        $debug_info = "$node: DEBUG $method $request_url -d $content";
+        if ($::UPLOAD_FILE) {
+            # Slightly different debug message when doing a file upload
+            $debug_info = "$node: DEBUG $method $request_url -T " . $::UPLOAD_FILE;
+        }
+        else {
+            $debug_info = "$node: DEBUG $method $request_url -d $content";
+        }
     }
     print "$debug_info\n";
 
@@ -864,6 +924,15 @@ sub deal_with_response {
         my $error;
         if ($response->status_line eq $::RESPONSE_SERVICE_UNAVAILABLE) {
             $error = $::RESPONSE_SERVICE_UNAVAILABLE;
+        } elsif ($response->status_line eq $::RESPONSE_METHOD_NOT_ALLOWED) {
+            # Special processing for file upload. At this point we do not know how to
+            # form a proper file upload request. It always fails with "Method not allowed" error.
+            # If that happens, just assume it worked. 
+            # TODO remove this block when proper request can be generated
+            $status_info{ $node_info{$node}{cur_status} }->{process}->($node, $response); 
+
+            return;
+            
         } else {
             my $response_info = decode_json $response->content;
             if ($response->status_line eq $::RESPONSE_SERVER_ERROR) {
@@ -1018,10 +1087,10 @@ sub rinv_response {
 
     my $grep_string;
     if ($node_info{$node}{cur_status} eq "RINV_FIRM_RESPONSE") {
-         $grep_string = "firm";
-     } else {
-         $grep_string = $status_info{RINV_RESPONSE}{argv};
-     }
+        $grep_string = "firm";
+    } else {
+        $grep_string = $status_info{RINV_RESPONSE}{argv};
+    }
 
     my $src;
     my $content_info;
@@ -1031,52 +1100,48 @@ sub rinv_response {
         my %content = %{ ${ $response_info->{data} }{$key_url} };
 
         if ($grep_string eq "firm") {
+            # This handles the data from the /xyz/openbmc_project/Software endpoint.
+            my $sw_id = (split(/\//, $key_url))[-1];
             if (defined($content{Version}) and $content{Version}) {
-                my $firm_ver = "System Firmware Product Version: " . "$content{Version}";
-                xCAT::SvrUtils::sendmsg("$firm_ver", $callback, $node);
-                next;
+                my $purpose_value = uc ((split(/\./, $content{Purpose}))[-1]);
+                $purpose_value = "[$sw_id]$purpose_value";
+                my $activation_value = (split(/\./, $content{Activation}))[-1];
+                #
+                # For 'rinv firm', only print Active software, unless verbose is specified
+                #
+                if ($activation_value =~ "Active" or $::VERBOSE) {
+                    #
+                    # The space below between "Firmware Product Version:" and $content{Version} is intentional
+                    # to cause the sorting of this line before any additional info lines 
+                    #
+                    $content_info = "$purpose_value Firmware Product:   $content{Version} ($activation_value)";
+                    push (@sorted_output, $content_info); 
+    
+                    if (defined($content{ExtendedVersion}) and $content{ExtendedVersion} ne "") { 
+                        # ExtendedVersion is going to be a comma separated list of additional software
+                        my @versions = split(',', $content{ExtendedVersion});
+                        foreach my $ver (@versions) { 
+                            $content_info = "$purpose_value Firmware Product: -- additional info: $ver";
+                            push (@sorted_output, $content_info);
+                        }
+                    }
+                    next;
+                }
             }
-        }
+        } else {
+            if (! defined $content{Present}) {
+                # This should never happen, but if we find this, contact firmware team to fix...
+                xCAT::SvrUtils::sendmsg("ERROR: Invalid data for $key_url, contact firmware team!", $callback, $node);
+                next; 
+            }
 
-        if (($grep_string eq "vpd" or $grep_string eq "model") and $key_url =~ /\/motherboard$/) {
-            my $partnumber = "BOARD Part Number: " . "$content{PartNumber}";
-            xCAT::SvrUtils::sendmsg("$partnumber", $callback, $node);
-            next if ($grep_string eq "model");
-        } 
+            # SPECIAL CASE: If 'serial' or 'model' is specified, only return the system level information
+            if ($grep_string eq "serial" or $grep_string eq "model") {
+                if ($key_url ne "$openbmc_project_url/inventory/system") {
+                    next;
+                }
+            }
 
-        if (($grep_string eq "vpd" or $grep_string eq "serial") and $key_url =~ /\/motherboard$/) {
-            my $serialnumber = "BOARD Serial Number: " . "$content{SerialNumber}";
-            xCAT::SvrUtils::sendmsg("$serialnumber", $callback, $node);
-            next if ($grep_string eq "serial");
-        } 
-
-        if (($grep_string eq "vpd" or $grep_string eq "mprom") and $key_url =~ /\/motherboard$/) {
-            xCAT::SvrUtils::sendmsg("No mprom information is available", $callback, $node);
-            next if ($grep_string eq "mprom");
-        } 
-
-        if (($grep_string eq "vpd" or $grep_string eq "deviceid") and $key_url =~ /\/motherboard$/) {
-            xCAT::SvrUtils::sendmsg("No deviceid information is available", $callback, $node);
-            next if ($grep_string eq "deviceid");
-        } 
-
-        if ($grep_string eq "uuid") {
-            xCAT::SvrUtils::sendmsg("No uuid information is available", $callback, $node);
-            last;
-        } 
-
-        if ($grep_string eq "guid") {
-            xCAT::SvrUtils::sendmsg("No guid information is available", $callback, $node);
-            last;
-        } 
-
-        if ($grep_string eq "mac" and $key_url =~ /\/ethernet/) {
-            my $macaddress = "MAC: " . $content{MACAddress};
-            xCAT::SvrUtils::sendmsg("$macaddress", $callback, $node);
-            next;
-        } 
-
-        if ($grep_string eq "all" or $key_url =~ /\/$grep_string/) {
             if ($key_url =~ /\/(cpu\d*)\/(\w+)/) {
                 $src = "$1 $2";
             } else {
@@ -1084,17 +1149,32 @@ sub rinv_response {
             }
 
             foreach my $key (keys %content) {
+                # If not all options is specified, check whether the key string contains
+                # the keyword option.  If so, add it to the return data
+                if ($grep_string ne "all" and ((lc($key) !~ m/$grep_string/i) and ($key_url !~ m/$grep_string/i)) ) {
+                    next;
+                }
                 $content_info = uc ($src) . " " . $key . " : " . $content{$key};
-                push (@sorted_output, $node . ": ". $content_info); #Save output in array
+                push (@sorted_output, $content_info); #Save output in array
             }
         }
-     }
-     # If sorted array has any contents, sort it and print it
-     if (scalar @sorted_output > 0) {
-         @sorted_output = sort @sorted_output; #Sort all output
-         my $result = join "\n", @sorted_output; #Join into a single string for easier display
-         xCAT::SvrUtils::sendmsg("$result", $callback);
-     }
+    }
+    # If sorted array has any contents, sort it and print it
+    if (scalar @sorted_output > 0) {
+        # sort alpha, then numeric 
+        my @sorted_output = grep {s/(^|\D)0+(\d)/$1$2/g,1} sort 
+            grep {s/(\d+)/sprintf"%06.6d",$1/ge,1} @sorted_output;
+        foreach (@sorted_output) { 
+            #
+            # The firmware output requires the ID to be part of the string to sort correctly.
+            # Remove this ID from the output to the user
+            #
+            $_ =~ s/\[.*?\]//;
+            xCAT::SvrUtils::sendmsg("$_", $callback, $node);
+        }
+    } else {
+        xCAT::SvrUtils::sendmsg("$::NO_ATTRIBUTES_RETURNED", $callback, $node);
+    }
 
     if ($next_status{ $node_info{$node}{cur_status} }) {
         $node_info{$node}{cur_status} = $next_status{ $node_info{$node}{cur_status} };
@@ -1287,6 +1367,56 @@ sub rspconfig_response {
 
 #-------------------------------------------------------
 
+=head3  rspconfig_sshcfg_response
+
+  Deal with response of rspconfig command for sscfg subcommand.
+  Append contents of id_rsa.pub file from management node to
+  the authorized_keys file on BMC
+  Input:
+        $node: nodename of current response
+        $response: Async return response
+
+=cut
+
+#-------------------------------------------------------
+sub rspconfig_sshcfg_response {
+    my $node = shift;
+    my $response = shift;
+
+    my $response_info = decode_json $response->content; 
+
+    use xCAT::RShellAPI;
+    if ($node_info{$node}{cur_status} eq "RSPCONFIG_SSHCFG_RESPONSE") {
+        my $bmcip = $node_info{$node}{bmc};
+        my $userid = $node_info{$node}{username}; 
+        my $userpw = $node_info{$node}{password};
+        my $filename = "/root/.ssh/id_rsa.pub";
+
+        # Read in contents of the id_rsa.pub file
+        open my $fh, '<', $filename or die "Error opening $filename: $!";
+        my $id_rsa_pub_contents = do { local $/; <$fh> };
+
+        # Login and append content of the read in id_rsa.pub file to the authorized_keys file on BMC
+        my $output = xCAT::RShellAPI::run_remote_shell_api($bmcip, $userid, $userpw, 0, 0, "mkdir -p ~/.ssh; echo \"$id_rsa_pub_contents\" >> ~/.ssh/authorized_keys");
+
+        # If error was returned from executing command above. Display it to the user.
+        # output[0] contains 1 is error, output[1] contains error messages
+        if (@$output[0] == 1) {
+            xCAT::SvrUtils::sendmsg("Error copying ssh keys to $bmcip:\n" . @$output[1], $callback, $node);
+        }
+        else {
+            xCAT::SvrUtils::sendmsg("ssh keys copied to $bmcip", $callback, $node);
+        }
+    }
+    if ($next_status{ $node_info{$node}{cur_status} }) {
+        $node_info{$node}{cur_status} = $next_status{ $node_info{$node}{cur_status} };
+        gen_send_request($node);
+    } else {
+        $wait_node_num--;
+    } 
+}
+#-------------------------------------------------------
+
 =head3  rvitals_response
 
   Deal with response of rvitals command
@@ -1419,6 +1549,43 @@ sub rflash_response {
             xCAT::SvrUtils::sendmsg(sprintf("%-8s %-7s %-8s %s", $update_id, $update_purpose, $update_activation, $update_version), $callback, $node);
         }
         xCAT::SvrUtils::sendmsg("", $callback, $node); #Separate output in case more than 1 endpoint
+    }
+    if ($node_info{$node}{cur_status} eq "RFLASH_FILE_UPLOAD_RESPONSE") {
+        # Special processing for file upload. At this point we do not know how to
+        # form a proper file upload request. It always fails with "Method not allowed" error.
+        # If that happens, just call the curl commands for now. 
+        # TODO remove this block when proper request can be generated
+        if ($::UPLOAD_FILE) {
+            my $request_url = "$http_protocol://" . $node_info{$node}{bmc};
+            my $content_login = '{ "data": [ "' . $node_info{$node}{username} .'", "' . $node_info{$node}{password} . '" ] }';
+            my $content_logout = '{ "data": [ ] }';
+
+            # curl commands
+            my $curl_login_cmd  = "curl -c cjar -k -H 'Content-Type: application/json' -X POST $request_url/login -d '" . $content_login . "'";
+            my $curl_logout_cmd = "curl -b cjar -k -H 'Content-Type: application/json' -X POST $request_url/logout -d '" . $content_logout . "'";
+            my $curl_upload_cmd = "curl -b cjar -k -H 'Content-Type: application/octet-stream' -X PUT -T $::UPLOAD_FILE $request_url/upload/image/";
+
+            # Try to login
+            my $curl_login_result = `$curl_login_cmd`;
+            my $h = from_json($curl_login_result); # convert command output to hash
+            if ($h->{message} eq $::RESPONSE_OK) {
+                # Login successfull, upload the file
+                my $curl_upload_result = `$curl_upload_cmd`;
+                $h = from_json($curl_upload_result); # convert command output to hash
+                if ($h->{message} eq $::RESPONSE_OK) {
+                    # Upload successfull
+                    xCAT::SvrUtils::sendmsg("Update file $::UPLOAD_FILE successfully uploaded", $callback, $node);
+                    # Try to logoff, no need to check result, as there is nothing else to do if failure
+                    my $curl_logout_result = `$curl_logout_cmd`;
+                }
+                else {
+                    xCAT::SvrUtils::sendmsg("Failed to upload update file $::UPLOAD_FILE :" . $h->{message} . " - " . $h->{data}->{description}, $callback, $node);
+                }
+            }
+            else {
+                xCAT::SvrUtils::sendmsg("Unable to login :" . $h->{message} . " - " . $h->{data}->{description}, $callback, $node);
+            }
+        }
     }
 
     if ($next_status{ $node_info{$node}{cur_status} }) {

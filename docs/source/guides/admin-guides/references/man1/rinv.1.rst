@@ -25,21 +25,21 @@ BMC/MPA specific:
 =================
 
 
-\ **rinv**\  \ *noderange*\  {\ **pci | model | serial | asset | vpd | mprom | deviceid | guid | firm | diag | dimm | bios | mparom | mac | all**\ }
+\ **rinv**\  \ *noderange*\  [\ **model | serial | asset | vpd | deviceid | guid | firm | dimm | mprom | all**\ ]
 
 
-OpenPOWER (using ipmi) server specific:
-=======================================
+OpenPOWER (IPMI) server specific:
+=================================
 
 
 \ **rinv**\  \ *noderange*\  [\ **model | serial | deviceid | uuid | guid | vpd | mprom | firm | all**\ ]
 
 
-OpenPOWER (using openbmc) server specific:
-==========================================
+OpenPOWER (OpenBMC) server specific:
+====================================
 
 
-\ **rinv**\  \ *noderange*\  [\ **model | serial | deviceid | uuid | guid | vpd | mprom | firm | cpu | dimm | all**\ ]
+\ **rinv**\  \ *noderange*\  [\ **model | serial | firm | cpu | dimm | all**\ ] [\ **-V | -**\ **-verbose**\ ]
 
 
 PPC (with HMC) specific:
@@ -126,12 +126,6 @@ Calling \ **rinv**\  for VMware will display the UUID/GUID, number of CPUs, amou
 
 
 
-\ **pci**\ 
- 
- Retrieves PCI bus information.
- 
-
-
 \ **bus**\ 
  
  List all buses for each I/O slot.
@@ -140,8 +134,7 @@ Calling \ **rinv**\  for VMware will display the UUID/GUID, number of CPUs, amou
 
 \ **config**\ 
  
- Retrieves number of processors, speed, total memory, and DIMM
- locations.
+ Retrieves number of processors, speed, total memory, and DIMM locations.
  
 
 
@@ -177,7 +170,7 @@ Calling \ **rinv**\  for VMware will display the UUID/GUID, number of CPUs, amou
 
 \ **asset**\ 
  
- Retrieves asset tag.  Usually it's the MAC address of eth0.
+ Retrieves asset tag. Usually it's the MAC address of eth0.
  
 
 
@@ -195,25 +188,31 @@ Calling \ **rinv**\  for VMware will display the UUID/GUID, number of CPUs, amou
 
 \ **mprom**\ 
  
- Retrieves mprom firmware level
+ Retrieves mprom firmware level.
+ 
+
+
+\ **dimm**\ 
+ 
+ Retrieves dual in-line memory module information.
  
 
 
 \ **deviceid**\ 
  
- Retrieves device identification. Usually device, manufacturing and product ids.
+ Retrieves device identification. Usually device, manufacturing and product IDs.
  
 
 
 \ **uuid**\ 
  
- Retrieves the universally unique identifier
+ Retrieves the universally unique identifier.
  
 
 
 \ **guid**\ 
  
- Retrieves the global unique identifier
+ Retrieves the global unique identifier .
  
 
 
@@ -232,6 +231,12 @@ Calling \ **rinv**\  for VMware will display the UUID/GUID, number of CPUs, amou
 \ **-v | -**\ **-version**\ 
  
  Print version.
+ 
+
+
+\ **-V | -**\ **-verbose**\ 
+ 
+ Prints verbose output, if available.
  
 
 
