@@ -74,7 +74,7 @@ script:
 
 #- ruby ./travis.rb
 #- perl travis.pl
-- if [ $TRAVIS_EVENT_TYPE == "pull_request" ]; then perl ./travis.pl; else echo "lalala"; fi 
+- if [ $TRAVIS_EVENT_TYPE == "pull_request" ]; then perl ./travis.pl;  fi 
 #- perl travis_new.pl
 
 
