@@ -22,6 +22,7 @@ $Term::ANSIColor::AUTORESET = 1;
 #---Global attributes---
 my $rst = 0;
 my $exit_code = 0;
+my $check_result_str="``CI CHECK RESULT`` : ";
 
 #--------------------------------------------------------
 # Fuction name: runcmd
@@ -115,9 +116,11 @@ sub check_pr_format{
         }
         
         if(length($checkrst) == 0){
-            send_back_comment("> **PR FORMAT CORRECT**"); 
+            $check_result_str .= "> **PR FORMAT CORRECT**";
+            send_back_comment("$check_result_str"); 
         }else{
-            send_back_comment("> **PR FORMAT ERROR** : $checkrst");  
+            $check_result_str .= "> **PR FORMAT ERROR** : $checkrst";
+            send_back_comment("$check_result_str"); 
             return 1;
         }
     }
@@ -146,14 +149,20 @@ sub send_back_comment{
     my $post_method = "POST";
     if($comment_len > 0){
         foreach my $comment (@{$comment_content}){
-            if(($comment->{'body'} =~ /SYNTAX/ && $message =~ /SYNTAX/) 
-              ||($comment->{'body'} =~ /BUILD/ && $message =~ /BUILD/)
-              ||($comment->{'body'} =~ /FORMAT/ && $message =~ /FORMAT/)
-              ||($comment->{'body'} =~ /INSTALL/ &&  $message =~ /INSTALL/)
-              ||($comment->{'body'} =~ /FAST REGRESSION/ &&  $message =~ /FAST REGRESSION/)){
-                $post_url = $comment->{'url'};
-                $post_method = "PATCH";
+            #if(($comment->{'body'} =~ /SYNTAX/ && $message =~ /SYNTAX/) 
+            #  ||($comment->{'body'} =~ /BUILD/ && $message =~ /BUILD/)
+            #  ||($comment->{'body'} =~ /FORMAT/ && $message =~ /FORMAT/)
+            #  ||($comment->{'body'} =~ /INSTALL/ &&  $message =~ /INSTALL/)
+            #  ||($comment->{'body'} =~ /FAST REGRESSION/ &&  $message =~ /FAST REGRESSION/)){
+            #    $post_url = $comment->{'url'};
+            #    $post_method = "PATCH";
+            #}
+            
+            if($comment->{'body'} =~ /CI CHECK RESULT/) {
+                 $post_url = $comment->{'url'};
+                 $post_method = "PATCH";
             }
+            
         }
     }
     
@@ -187,11 +196,13 @@ sub build_xcat_core{
         print "[build_xcat_core] $cmd ....[Failed]\n";
         print ">>>>>Dumper the output of '$cmd'\n";
         print Dumper \@output;
-        send_back_comment("> **BUILD ERROR** : ``$lastline``. Please get detaied information in ``Merge pull request`` box");
+        $check_result_str .= "> **BUILD ERROR**, Please get detaied information in ``Merge pull request`` box";
+        send_back_comment("$check_result_str");
         return 1;
     }else{
         print "[build_xcat_core] $cmd ....[Pass]\n";
-        send_back_comment("> **BUILD SUCCESSFUL**");  
+        $check_result_str .= "> **BUILD SUCCESSFUL** ";
+        send_back_comment("$check_result_str");
     }
 
     return 0;
@@ -218,7 +229,8 @@ sub install_xcat{
             print RED "[install_xcat] $cmd. ...[Failed]\n";
             print "[install_xcat] error message:\n";
             print Dumper \@output;
-            send_back_comment("> **INSTALL XCAT ERROR** : Please get detaied information in ``Merge pull request`` box");
+            $check_result_str .= "> **INSTALL XCAT ERROR** : Please get detaied information in ``Merge pull request`` box ";
+            send_back_comment("$check_result_str");
             return 1;
         }
     }
@@ -233,7 +245,8 @@ sub install_xcat{
         print "[install_xcat] $cmd ....[Failed]\n";
         print ">>>>>Dumper the output of '$cmd'\n";
         print Dumper \@output;
-        send_back_comment("> **INSTALL XCAT ERROR** : Please get detaied information in ``Merge pull request`` box");
+        $check_result_str .= "> **INSTALL XCAT ERROR** : Please get detaied information in ``Merge pull request`` box";
+        send_back_comment("$check_result_str");     
         return 1;
     }else{
         print "[install_xcat] $cmd ....[Pass]\n";
@@ -260,10 +273,12 @@ sub install_xcat{
             }
         }
         if($ret){
-            send_back_comment("> **INSTALL XCAT ERROR** : Please get detaied information in ``Merge pull request`` box");
+            $check_result_str .= "> **INSTALL XCAT ERROR** : Please get detaied information in ``Merge pull request`` box";
+            send_back_comment("$check_result_str");
             return 1;
         }
-        send_back_comment("> **INSTALL XCAT SUCCESSFUL**");
+        $check_result_str .= "> **INSTALL XCAT SUCCESSFUL**";
+        send_back_comment("$check_result_str");
     }
     return 0;
 }
@@ -311,10 +326,12 @@ sub check_syntax{
         print "[check_syntax] syntax checking ....[Failed]\n";
         print "[check_syntax] Dumper error message:\n";
         print Dumper @syntax_err;
-        send_back_comment("> **SYNTAX ERROR** : Please get detaied information in ``Merge pull request`` box");
+        $check_result_str .= "> **CODE SYNTAX ERROR** : Please get detaied information in ``Merge pull request`` box";
+        send_back_comment("$check_result_str");
     }else{
         print "[check_syntax] syntax checking ....[Pass]\n";
-        send_back_comment("> **SYNTAX CORRECT!**");
+        $check_result_str .= "> **CODE SYNTAX CORRECT**";
+        send_back_comment("$check_result_str");
     }
 
     return $ret;
@@ -395,10 +412,12 @@ sub run_fast_regression_test{
 
     if($failnum){
         my $log_str = join (",", @failcase );
-        send_back_comment("> **FAST REGRESSION TEST Failed**: Totalcase $casenum Pass $passnum failed $failnum FailedCases: $log_str.  Please get detaied information in ``Merge pull request`` box");
+        $check_result_str .= "> **FAST REGRESSION TEST Failed**: Totalcase $casenum Pass $passnum failed $failnum FailedCases: $log_str.  Please get detaied information in ``Merge pull request`` box";
+        send_back_comment("$check_result_str");
         return 1;
-    }else{
-        send_back_comment("> **FAST REGRESSION TEST Successful**: Totalcase $casenum Pass $passnum failed $failnum");
+    }else{   
+        $check_result_str .= "> **FAST REGRESSION TEST Successful**: Totalcase $casenum Pass $passnum failed $failnum";
+        send_back_comment("$check_result_str");
     }
 
     return 0;
@@ -411,9 +430,12 @@ sub run_fast_regression_test{
 # Retrun code:
 #--------------------------------------------------------
 sub mark_time{
-    my $runstart    = timelocal(localtime());
-    my $runstartstr = scalar(localtime());
-    print "[mark_time] $runstartstr\n";
+    my $func_name=shift;
+    my $nowtime    = timelocal(localtime());
+    my $nowtime_str = scalar(localtime());
+    my $duration = $nowtime - $last_func_start;
+    $last_func_start = $nowtime;
+    print "[mark_time] $nowtime_str, ElapsedTime of $func_name is $duration s\n";
 }
 
 #===============Main Process=============================
@@ -449,50 +471,51 @@ print "Disk information:\n";
 print Dumper \@disk;
 
 #Start to check the format of pull request
-&mark_time;
+my $last_func_start = timelocal(localtime());
 print GREEN "\n------To Check Pull Request Format------\n";
 $rst  = check_pr_format();
 if($rst){
     print RED "Check pull request format failed\n";
     exit $rst;
 }
+mark_time("check_pr_format");
 
 #Start to build xcat core
-&mark_time;
+
 print GREEN "\n------To Build xCAT core package------\n";
 $rst = build_xcat_core();
 if($rst){
     print RED "Build xCAT core package failed\n";
     exit $rst;
 }
+mark_time("build_xcat_core");
 
 #Start to install xcat
-&mark_time;
 print GREEN "\n------To install xcat------\n";
 $rst = install_xcat();
 if($rst){
     print RED "Install xcat failed\n";
     exit $rst;
 }
+mark_time("install_xcat");
 
 #Check the syntax of changing code
-&mark_time;
 print GREEN "\n------To check the syntax of changing code------\n";
 $rst = check_syntax();
 if($rst){
     print RED "check the syntax of changing code failed\n";
     exit $rst;
 }
+mark_time("check_syntax");
 
 #run fast regression
-&mark_time;
 print GREEN "\n------To run fast regression test------\n";
 $rst = run_fast_regression_test();
 if($rst){
     print RED "Run fast regression test failed\n";
     exit $rst;
 }
+mark_time("run_fast_regression_test");
 
-&mark_time;
 #$exit_code = 0;
 exit 0;
