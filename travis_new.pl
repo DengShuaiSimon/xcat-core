@@ -23,6 +23,7 @@ $Term::ANSIColor::AUTORESET = 1;
 my $rst = 0;
 my $exit_code = 0;
 my $check_result_str="``CI CHECK RESULT`` : ";
+my $last_func_start = timelocal(localtime());
 
 #--------------------------------------------------------
 # Fuction name: runcmd
@@ -471,7 +472,7 @@ print "Disk information:\n";
 print Dumper \@disk;
 
 #Start to check the format of pull request
-my $last_func_start = timelocal(localtime());
+$last_func_start = timelocal(localtime());
 print GREEN "\n------To Check Pull Request Format------\n";
 $rst  = check_pr_format();
 if($rst){
