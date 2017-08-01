@@ -7,6 +7,7 @@ require 'uri'
 #require 'pry'
 require 'find'
 
+#comm
 #repo =Travis::Repository.current
 #puts repo
 #ower_repo = system('echo $TRAVIS_REPO_SLUG')
