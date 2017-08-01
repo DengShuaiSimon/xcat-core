@@ -7,7 +7,7 @@ before_install:
 - sudo apt-get install -y git reprepro devscripts debhelper libsoap-lite-perl libdbi-perl quilt openssh-server dpkg looptools genometools software-properties-common
 - perl -v
 #- echo "install Capture::Tiny" | perl -MCPAN -e 'shell'
-- cpan -f -i Capture::Tiny
+- echo "yes" | cpan -f -i Capture::Tiny
 
 #- echo yes | perl -MCPAN -e 'my $c = "CPAN::HandleConfig"; $c->load(doit => 1, autoconfig => 1); $c->edit(prerequisites_policy => "follow"); $c->edit(build_requires_install_policy => "yes"); $c->commit'
 #- echo yes > perl -MCPAN -e shell
