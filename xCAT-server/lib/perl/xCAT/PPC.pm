@@ -21,7 +21,7 @@ use xCAT::DBobjUtils;
 use xCAT_monitoring::monitorctrl;
 use Thread qw(yield);
 use xCAT::PPCdb;
-
+use Capture::Tiny ':all';
 #use Data::Dumper;
 
 ##########################################
