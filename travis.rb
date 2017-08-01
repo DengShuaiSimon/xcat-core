@@ -37,7 +37,6 @@ system("cat #{tmppath}/1.txt")
 
 
 
-
 ##########################     pull_request format check   ####################
 if(event_type == "pull_request")
   #pull_number = system('echo $TRAVIS_PULL_REQUEST')
