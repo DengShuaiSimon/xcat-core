@@ -6,7 +6,7 @@ require 'net/http'
 require 'uri'
 #require 'pry'
 require 'find'
-
+#com
 #repo =Travis::Repository.current
 #puts repo
 #ower_repo = system('echo $TRAVIS_REPO_SLUG')
